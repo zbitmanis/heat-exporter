@@ -9,6 +9,8 @@
 extern int status;     // the WiFi radio's status
 extern WiFiServer server;           //WiFiServer
 
+
+
 void printWifiData();
 void printCurrentNet();
 void printMacAddress(byte mac[]);

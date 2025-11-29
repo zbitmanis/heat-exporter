@@ -6,6 +6,8 @@
 int status = WL_IDLE_STATUS;          // the WiFi radio's status
 WiFiServer server(WIFI_SERVER_PORT);  //WiFi WebServer
 
+
+
 void printWifiData() {
   // print your board's IP address:
   IPAddress ip = WiFi.localIP();

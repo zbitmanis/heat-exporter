@@ -6,20 +6,25 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
+#include "heat-exporter.h"
 #include "sensor.h"
 #include "wifi.h"
 #include "secrets.h"
+#include "lcd.h"
 
 #define DHTPIN1 2
 #define DHTPIN2 3
 #define DHTPIN3 4
 #define DHTPIN4 5
 #define DHTPIN5 6
-#define DHT_CONECTED 3
+#define DHT_CONECTED 5
 #define DHT_DELAY_SENSOR 0
 //#define DHT_USE_HUMIDITY
+#define BUTTON_PIN 6
+#define BUZZER_PIN 7
 
-
+#define DHT_INTERVAL 2000
+#define BUTTON_INTERVAL 250
 
 
 
@@ -27,63 +32,22 @@
 #define DHTTYPE DHT22
 
 
-#define I2C_ADDR 0x27
-#define LCD_COLUMNS 16
-#define LCD_LINES 2
-#define LCD_DEG_CHAR 223
+
 
 
 uint32_t genDelayMS = 1000;
+byte lastButtonState = HIGH;
+byte buttonState = HIGH;
+
+unsigned long startMillis = 0;
+unsigned long currentMillis = 0;
+
+
 
 
 LiquidCrystal_I2C lcd = LiquidCrystal_I2C(I2C_ADDR, LCD_COLUMNS, LCD_LINES);
 
-void setupLCDOutput(
-  byte dht_count,
-  std::vector<Sensor>&,
-  byte sitype,
-  bool blink = false,
-  byte hlen = 3,
-  bool backlight = true) {
-  byte maxpos = 0;
 
-  if (blink) {
-    for (byte i = 0; i < 2; i++) {
-      lcd.backlight();
-      delay(250);
-      lcd.noBacklight();
-      delay(250);
-    }
-  }
-
-  for (byte i = 0; i < dht_count; i++) {
-    byte pos = i * hlen;
-    maxpos = pos;
-    lcd.setCursor(i * hlen, 0);
-    lcd.print(sensors[i].header);
-  }
-
-  if (maxpos < LCD_COLUMNS - 2) {
-    switch (sitype) {
-      case DHT_SITTYPE1:
-        lcd.setCursor(LCD_COLUMNS - 2, 0);
-        lcd.print(char(LCD_DEG_CHAR));
-        lcd.setCursor(LCD_COLUMNS - 1, 0);
-        lcd.print("C");
-        break;
-      case DHT_SITTYPE2:
-        lcd.setCursor(LCD_COLUMNS - 1, 0);
-        lcd.print(DHT_SITMEASURE2);
-        break;
-    }
-  }
-
-  if (backlight) {
-    lcd.backlight();
-  } else {
-    lcd.noBacklight();
-  }
-}
 
 void setup() {
   Serial.begin(9600);
@@ -96,6 +60,8 @@ void setup() {
   sensors.push_back(Sensor(DHTPIN3, "floor_out", "fo"));
   sensors.push_back(Sensor(DHTPIN4, "radiators_in", "ri"));
   sensors.push_back(Sensor(DHTPIN5, "radiators_out", "ro"));
+   
+  pinMode(BUTTON_PIN, INPUT);
 
   //iniitialize lcd
   lcd.init();
@@ -105,13 +71,13 @@ void setup() {
 
   strcat(ubuf, "C");
 
-  char ssid[] = SECRET_SSID;  // your network SSID (name)
-  char pass[] = SECRET_PASS;  // your network password (use for WPA, or use as key for WEP)
+  char ssid[] = SECRET_SSID;  
+  char pass[] = SECRET_PASS;  
 
   connectToWifi(&status, ssid, pass);
 
 
-  setupLCDOutput(DHT_CONECTED, sensors, DHT_SITTYPE2, true);
+  setupLCDOutput(&lcd, DHT_CONECTED, sensors, DHT_SITTYPE1, true, true);
 
   // initilaize sensors
 
@@ -142,27 +108,32 @@ void loop() {
   sensors_event_t event;
   char buf[64];
   byte tlen = 3;
-  for (byte i = 0; i < DHT_CONECTED; i++) {
-    sensors[i].dht->temperature().getEvent(&event);
+  currentMillis = millis();
+  if (currentMillis - startMillis >= DHT_INTERVAL) {
+    startMillis = currentMillis;
+    for (byte i = 0; i < DHT_CONECTED; i++) {
+      sensors[i].dht->temperature().getEvent(&event);
 
-    lcd.setCursor(i * tlen, 1);
+      lcd.setCursor(i * tlen, 1);
 
-    if (isnan(event.temperature)) {
-      strcpy(buf, "error reading temperature for ");
-      strcat(buf, sensors[i].name);
-      Serial.println(buf);
-      sensors[i].last_temperature = DHT_ERR;
-    } else {
-      sensors[i].last_temperature = event.temperature;
+      if (isnan(event.temperature)) {
+        strcpy(buf, "error reading temperature for ");
+        strcat(buf, sensors[i].name);
+        Serial.println(buf);
+        sensors[i].last_temperature = DHT_ERR;
+        lcd.print("Er");
+      } else {
+        sensors[i].last_temperature = event.temperature;
 
-      lcd.print(sensors[i].last_temperature);
-      strcpy(buf, DHT_SITYPE1_NAME);
-      strcat(buf, " for ");
-      strcat(buf, sensors[i].name);
-      strcat(buf, ": ");
-      Serial.print(buf);
-      Serial.print(event.temperature);
-      Serial.println(DHT_SITMEASURE1);
+        lcd.print(sensors[i].last_temperature);
+        strcpy(buf, DHT_SITYPE1_NAME);
+        strcat(buf, " for ");
+        strcat(buf, sensors[i].name);
+        strcat(buf, ": ");
+        Serial.print(buf);
+        Serial.print(event.temperature);
+        Serial.println(DHT_SITMEASURE1);
+      }
     }
   }
   //delay(100);
