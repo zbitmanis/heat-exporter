@@ -4,9 +4,16 @@
 #include "wifi.h"
 
 int status = WL_IDLE_STATUS;          // the WiFi radio's status
-WiFiServer server(WIFI_SERVER_PORT);  //WiFi WebServer
 
+bool getWifiStatus(){
+  return WiFi.RSSI() != 0 && WiFi.localIP();
+}
 
+bool getWifiStatus(HardwareSerial * serial){
+  serial->print("wi status: ");
+  serial->println(WiFi.status());
+  return getWifiStatus();
+}
 
 void printWifiData() {
   // print your board's IP address:
@@ -20,6 +27,26 @@ void printWifiData() {
   WiFi.macAddress(mac);
   Serial.print("MAC address: ");
   printMacAddress(mac);
+}
+
+void printWifiData(LiquidCrystal_I2C *lcd, byte col) {
+  // print your board's IP address:
+  IPAddress ip = WiFi.localIP();
+  lcd->setCursor(0, 0);
+  lcd->print("WF:");
+  lcd->setCursor(3, 0);
+  lcd->print(WiFi.SSID());
+  lcd->setCursor(col -3, 0);
+  
+  lcd->print(WiFi.RSSI());  
+  lcd->setCursor(0, 1);
+  lcd->print("IP:");
+  lcd->setCursor(3, 1);
+  lcd->print(ip);
+
+  // print your MAC address:
+  //byte mac[6];
+  //WiFi.macAddress(mac);
 }
 
 void printCurrentNet() {
@@ -58,37 +85,49 @@ void printMacAddress(byte mac[]) {
   Serial.println();
 }
 
-void connectToWifi(int *status, const char *ssid, const char *pass) {
-  //WL_IDLE_STATUS
-
+void connectToWifi(int *status, const char *ssid, const char *pass, byte ledPin) {
+  // blink led to identify status connecting to Wifi
+  for (int i = 0; i<=3;i++){
+    digitalWrite(ledPin,HIGH);
+    delay(100);
+    digitalWrite(ledPin,LOW);
+    delay(100);
+  }
+  
   if (WiFi.status() == WL_NO_MODULE) {
     Serial.println("Communication with WiFi module failed!");
-    // don't continue
-    while (true)
-      ;
-  }
+   } else {
 
-  String fv = WiFi.firmwareVersion();
-  if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
-    Serial.println("Please upgrade the firmware");
-  }
+      String fv = WiFi.firmwareVersion();
+      if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
+        Serial.println("Please upgrade the firmware");
+      }
 
-  while (*status != WL_CONNECTED) {
-    Serial.print("Attempting to connect to WPA SSID: ");
-    Serial.println(ssid);
-    // Connect to WPA/WPA2 network:
-    *status = WiFi.begin(ssid, pass);
+      while (*status != WL_CONNECTED) {
+        Serial.print("Attempting to connect to WPA SSID: ");
+        Serial.println(ssid);
+        // Connect to WPA/WPA2 network:
+        *status = WiFi.begin(ssid, pass);
 
-    // wait 10 seconds for connection:
-    delay(10000);
-  }
-  Serial.print("You're connected to the network");
-  printCurrentNet();
-  printWifiData();
+        // wait 10 seconds for connection:
+        digitalWrite(ledPin,HIGH);
+        delay(5000);
 
-  byte mac[6];
-  WiFi.macAddress(mac);
+        digitalWrite(ledPin,LOW);
+        // if WiFi is disconnected blink led before the next loop
+        if(!getWifiStatus()){ 
+          delay(500);
+        }
+      }
 
-  Serial.print("MAC address: ");
-  printMacAddress(mac);
+      Serial.print("You're connected to the network");
+      printCurrentNet();
+      printWifiData();
+
+      byte mac[6];
+      WiFi.macAddress(mac);
+
+      Serial.print("MAC address: ");
+      printMacAddress(mac);
+   }
 }

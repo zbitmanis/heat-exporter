@@ -6,6 +6,7 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
+
 #include "heat-exporter.h"
 #include "sensor.h"
 #include "wifi.h"
@@ -20,34 +21,74 @@
 #define DHT_CONECTED 5
 #define DHT_DELAY_SENSOR 0
 //#define DHT_USE_HUMIDITY
-#define BUTTON_PIN 6
-#define BUZZER_PIN 7
+#define BUTTON_PIN 8
+#define LED_PIN 7
 
 #define DHT_INTERVAL 2000
 #define BUTTON_INTERVAL 250
+#define CLIENT_INTERVAL 50
+#define MIN_BUTTON_INTERVAL 50
 
 
+#define WIFI_SERVER_PORT 80
 
 
 #define DHTTYPE DHT22
 
 
-
-
-
-uint32_t genDelayMS = 1000;
 byte lastButtonState = HIGH;
-byte buttonState = HIGH;
-
-unsigned long startMillis = 0;
+byte buttonPressed = false;
+unsigned long startSensorMillis = 0;
+unsigned long startButtonMillis = 0;
+unsigned long buttonPressMillis = 0;
 unsigned long currentMillis = 0;
 
+unsigned int buttonPressDuration = 0;
 
+void processButtonEvent(unsigned long currentMillis, LiquidCrystal_I2C *lcd){
 
+    int buttonState = digitalRead(BUTTON_PIN);
+    if (DEBUG_HEATER) {
+      Serial.print("button state ");
+      Serial.println(buttonState);
+    }
+    if (buttonState == LOW && lastButtonState == HIGH) {
+      lastButtonState = buttonState;
+      buttonPressed = true;
+      buttonPressDuration = 0;
+      buttonPressMillis = currentMillis;
+
+      digitalWrite(LED_PIN, HIGH);
+
+      Serial.println("the button is pressed");
+      
+      clearLCD(lcd, LCD_LINES, LCD_COLUMNS);
+      printWifiData(lcd, LCD_COLUMNS);
+
+    } else if (buttonState == HIGH && lastButtonState == LOW) {
+      lastButtonState = buttonState;
+      buttonPressed = false;
+
+      digitalWrite(LED_PIN, LOW);
+      clearLCD(lcd, LCD_LINES, LCD_COLUMNS);
+      
+      bool ws = getWifiStatus(&Serial);
+      
+      setupLCDOutput(lcd, DHT_CONECTED, sensors, DHT_SITTYPE1, false, 3, true, ws);
+      
+      Serial.print("the button is released after ");
+      Serial.println(buttonPressDuration);
+      buttonPressDuration = 0;
+    
+    } else {
+      buttonPressDuration = currentMillis - buttonPressMillis;
+    }
+
+    startButtonMillis = currentMillis;
+}
 
 LiquidCrystal_I2C lcd = LiquidCrystal_I2C(I2C_ADDR, LCD_COLUMNS, LCD_LINES);
-
-
+WiFiServer server(WIFI_SERVER_PORT);  //WiFi WebServer
 
 void setup() {
   Serial.begin(9600);
@@ -55,13 +96,14 @@ void setup() {
     ;  // wait for serial port to connect.
   }
 
-  sensors.push_back(Sensor(DHTPIN1, "boiler_out", "bo"));
-  sensors.push_back(Sensor(DHTPIN2, "floor_in", "fi"));
-  sensors.push_back(Sensor(DHTPIN3, "floor_out", "fo"));
-  sensors.push_back(Sensor(DHTPIN4, "radiators_in", "ri"));
-  sensors.push_back(Sensor(DHTPIN5, "radiators_out", "ro"));
-   
-  pinMode(BUTTON_PIN, INPUT);
+  sensors.push_back(Sensor(DHTPIN1, "boiler_out", "bo",DHTTYPE));
+  sensors.push_back(Sensor(DHTPIN2, "floor_in", "fi", DHTTYPE));
+  sensors.push_back(Sensor(DHTPIN3, "floor_out", "fo",DHTTYPE));
+  sensors.push_back(Sensor(DHTPIN4, "radiators_in", "ri",DHTTYPE));
+  sensors.push_back(Sensor(DHTPIN5, "radiators_out", "ro",DHTTYPE));
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(LED_PIN, OUTPUT);
 
   //iniitialize lcd
   lcd.init();
@@ -71,77 +113,48 @@ void setup() {
 
   strcat(ubuf, "C");
 
-  char ssid[] = SECRET_SSID;  
-  char pass[] = SECRET_PASS;  
+  char ssid[] = SECRET_SSID;
+  char pass[] = SECRET_PASS;
 
-  connectToWifi(&status, ssid, pass);
+  connectToWifi(&status, ssid, pass, LED_PIN);
+  server.begin();
 
-
-  setupLCDOutput(&lcd, DHT_CONECTED, sensors, DHT_SITTYPE1, true, true);
+  setupLCDOutput(&lcd, DHT_CONECTED, sensors, DHT_SITTYPE1, true);
 
   // initilaize sensors
-
-  for (byte i = 0; i < DHT_CONECTED; i++) {
-    sensor_t sensor;
-
-    sensors[i].dht = new DHT_Unified(sensors[i].pin, DHTTYPE);
-
-    sensors[i].dht->begin();
-
-    sensors[i].dht->temperature().getSensor(&sensor);
-    if (i == DHT_DELAY_SENSOR) {
-      genDelayMS = sensor.min_delay / 1000;
-    }
-    printSensorInfo(&sensor, DHT_SITTYPE1, sensors[i].name);
-
-#ifdef DHT_USE_HUMIDITY
-    sensors[i].dht->humidity().getSensor(&sensor);
-    printSensorInfo(&sensor, DHT_SITTYPE2, sensors[i].name);
-#endif
-  }
+   initSensors(&Serial ,DHT_CONECTED, sensors );
 }
 
 
 
 void loop() {
-  delay(genDelayMS);
   sensors_event_t event;
-  char buf[64];
-  byte tlen = 3;
+
   currentMillis = millis();
-  if (currentMillis - startMillis >= DHT_INTERVAL) {
-    startMillis = currentMillis;
-    for (byte i = 0; i < DHT_CONECTED; i++) {
-      sensors[i].dht->temperature().getEvent(&event);
 
-      lcd.setCursor(i * tlen, 1);
-
-      if (isnan(event.temperature)) {
-        strcpy(buf, "error reading temperature for ");
-        strcat(buf, sensors[i].name);
-        Serial.println(buf);
-        sensors[i].last_temperature = DHT_ERR;
-        lcd.print("Er");
-      } else {
-        sensors[i].last_temperature = event.temperature;
-
-        lcd.print(sensors[i].last_temperature);
-        strcpy(buf, DHT_SITYPE1_NAME);
-        strcat(buf, " for ");
-        strcat(buf, sensors[i].name);
-        strcat(buf, ": ");
-        Serial.print(buf);
-        Serial.print(event.temperature);
-        Serial.println(DHT_SITMEASURE1);
-      }
+  if (currentMillis - startSensorMillis >= DHT_INTERVAL) {
+    startSensorMillis = currentMillis;
+    collectSensorData(sensors);
+    if (!buttonPressed) {
+      printSensorData(&lcd, &Serial, sensors);
     }
   }
-  //delay(100);
-  //lcd.setCursor(0, 0);
-  //lcd.print("Heater");
-  //lcd.setCursor(0, 1);
-  //lcd.print(millis() / 1000);
-  //delay(100);
+
+  if (currentMillis - startButtonMillis >= BUTTON_INTERVAL) {
+    processButtonEvent(currentMillis, &lcd);
+  }
+
+  if (currentMillis - startButtonMillis >= CLIENT_INTERVAL) {
+    WiFiClient client = server.available();
+
+    if (client) {
+      digitalWrite(LED_PIN, HIGH);
+      printSensorData( &client, &Serial, sensors ); 
+      client.stop();
+      digitalWrite(LED_PIN, LOW);
+    }
+  }
+
 
 #ifdef DHT_USE_HUMIDITY
 #endif
